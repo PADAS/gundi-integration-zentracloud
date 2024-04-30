@@ -6,6 +6,7 @@ import stamina
 import app.actions.client as client
 import app.services.gundi as gundi_tools
 
+from app.actions.configurations import PullObservationsConfig
 from app.services.activity_logger import activity_logger
 from app.services.state import IntegrationStateManager
 
@@ -83,7 +84,7 @@ async def filter_and_transform(device, readings, integration_id, action_id):
 
 
 @activity_logger()
-async def action_pull_observations(integration, action_config):
+async def action_pull_observations(integration, action_config: PullObservationsConfig):
     logger.info(f"Executing pull_observations action with integration {integration} and action_config {action_config}...")
     try:
         response_per_device = []
@@ -108,7 +109,7 @@ async def action_pull_observations(integration, action_config):
                     device,
                     device_readings,
                     str(integration.id),
-                    action_config.action.value
+                    "pull_observations"
                 )
 
                 if transformed_data:
@@ -132,7 +133,7 @@ async def action_pull_observations(integration, action_config):
                                     extra={
                                         'needs_attention': True,
                                         'integration_id': str(integration.id),
-                                        'action_id': action_config.action.value
+                                        'action_id': "pull_observations"
                                     }
                                 )
                                 response_per_device.append({"device": device, "response": [msg]})
@@ -143,7 +144,7 @@ async def action_pull_observations(integration, action_config):
                                 }
                                 await state_manager.set_state(
                                     str(integration.id),
-                                    action_config.action.value,
+                                    "pull_observations",
                                     state,
                                     device,
                                 )

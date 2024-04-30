@@ -1,11 +1,11 @@
 from typing import List
-from .core import ActionConfiguration
+from .core import AuthActionConfiguration, PullActionConfiguration
 
 
-class AuthenticateConfig(ActionConfiguration):
+class AuthenticateConfig(AuthActionConfiguration):
     token: str
 
 
-class PullObservationsConfig(ActionConfiguration):
+class PullObservationsConfig(PullActionConfiguration):
     devices_serial_number: List[str]
     devices_per_page: int = 1000
