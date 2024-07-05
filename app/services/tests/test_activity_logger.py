@@ -5,15 +5,22 @@ from gundi_core.events import (
     IntegrationActionStarted,
     IntegrationActionComplete,
     IntegrationActionFailed,
-    IntegrationActionCustomLog
+    IntegrationActionCustomLog,
+    IntegrationWebhookStarted,
+    IntegrationWebhookComplete,
+    IntegrationWebhookFailed
 )
 from app import settings
-from app.services.activity_logger import publish_event, activity_logger, log_activity
+from app.services.activity_logger import publish_event, activity_logger, webhook_activity_logger, log_activity
+from app.webhooks import GenericJsonPayload, GenericJsonTransformConfig
 
 
 @pytest.mark.parametrize(
     "system_event",
-    ["action_started_event", "action_complete_event", "action_failed_event", "custom_activity_log_event"],
+    [
+        "action_started_event", "action_complete_event", "action_failed_event", "custom_activity_log_event",
+        "webhook_started_event", "webhook_complete_event", "webhook_failed_event", "webhook_custom_activity_log_event"
+    ],
     indirect=["system_event"])
 @pytest.mark.asyncio
 async def test_publish_event(
@@ -58,6 +65,55 @@ async def test_activity_logger_decorator(
     assert mock_publish_event.call_count == 2
     assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationActionStarted)
     assert isinstance(mock_publish_event.call_args_list[1].kwargs.get("event"), IntegrationActionComplete)
+
+
+@pytest.mark.asyncio
+async def test_webhook_activity_logger(
+        mocker, mock_publish_event, integration_v2_with_webhook_generic,
+        mock_webhook_request_payload_for_dynamic_schema, mock_generic_webhook_config
+):
+
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+
+    @webhook_activity_logger()
+    async def webhook_handler(payload: GenericJsonPayload, integration=None, webhook_config: GenericJsonTransformConfig = None):
+        return {"observations_extracted": 10}
+
+    await webhook_handler(
+        payload=GenericJsonPayload(data=mock_webhook_request_payload_for_dynamic_schema),
+        integration=integration_v2_with_webhook_generic,
+        webhook_config=GenericJsonTransformConfig(**mock_generic_webhook_config)
+    )
+
+    # Two events expected: One on start and one on completion
+    assert mock_publish_event.call_count == 2
+    assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationWebhookStarted)
+    assert isinstance(mock_publish_event.call_args_list[1].kwargs.get("event"), IntegrationWebhookComplete)
+
+
+@pytest.mark.asyncio
+async def test_webhook_activity_logger_on_error(
+        mocker, mock_publish_event, integration_v2_with_webhook_generic,
+        mock_webhook_request_payload_for_dynamic_schema, mock_generic_webhook_config
+):
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+
+    @webhook_activity_logger()
+    async def webhook_handler(payload: GenericJsonPayload, integration=None,
+                              webhook_config: GenericJsonTransformConfig = None):
+        raise Exception("Something went wrong")
+
+    with pytest.raises(Exception):
+        await webhook_handler(
+            payload=GenericJsonPayload(data=mock_webhook_request_payload_for_dynamic_schema),
+            integration=integration_v2_with_webhook_generic,
+            webhook_config=GenericJsonTransformConfig(**mock_generic_webhook_config)
+        )
+
+    # Two events expected: One on start and one on error
+    assert mock_publish_event.call_count == 2
+    assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationWebhookStarted)
+    assert isinstance(mock_publish_event.call_args_list[1].kwargs.get("event"), IntegrationWebhookFailed)
 
 
 @pytest.mark.asyncio
@@ -113,7 +169,7 @@ async def test_log_activity_with_debug_level(mocker, integration_v2, pull_observ
         level=LogLevel.DEBUG,
         title="Extracted 10 observations from 2 devices",
         data={"devices": ["deviceid1", "deviceid2"]},
-        config_data=pull_observations_config.data
+        config_data=pull_observations_config.dict()
     )
     assert mock_publish_event.call_count == 1
     assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationActionCustomLog)
@@ -128,7 +184,7 @@ async def test_log_activity_with_info_level(mocker, integration_v2, mock_publish
         level=LogLevel.INFO,
         title="Extracting observations with filter..",
         data={"start_date": "2024-01-01", "end_date": "2024-01-31"},
-        config_data=pull_observations_config.data
+        config_data=pull_observations_config.dict()
     )
     assert mock_publish_event.call_count == 1
     assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationActionCustomLog)
@@ -142,7 +198,7 @@ async def test_log_activity_with_warning_level(mocker, integration_v2, mock_publ
         action_id="pull_observations",
         level=LogLevel.WARNING,
         title="Skipping end_date because it's greater than today. Please review your configuration.",
-        config_data=pull_observations_config.data
+        config_data=pull_observations_config.dict()
     )
     assert mock_publish_event.call_count == 1
     assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationActionCustomLog)
@@ -157,7 +213,7 @@ async def test_log_activity_with_error_level(mocker, integration_v2, mock_publis
         level=LogLevel.ERROR,
         title="Error getting data from System X",
         data={"error": "Connection error with host 'systemx.com'"},
-        config_data=pull_observations_config.data
+        config_data=pull_observations_config.dict()
     )
     assert mock_publish_event.call_count == 1
     assert isinstance(mock_publish_event.call_args_list[0].kwargs.get("event"), IntegrationActionCustomLog)
