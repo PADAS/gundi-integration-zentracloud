@@ -87,7 +87,9 @@ async def filter_and_transform(device, readings, integration_id, action_id):
 async def action_pull_observations(integration, action_config: PullObservationsConfig):
     logger.info(f"Executing pull_observations action with integration {integration} and action_config {action_config}...")
     try:
+        result = {"observations_extracted": 0, "details": {}}
         response_per_device = []
+        total_observations = 0
         async for attempt in stamina.retry_context(
                 on=httpx.HTTPError,
                 attempts=3,
@@ -103,7 +105,6 @@ async def action_pull_observations(integration, action_config: PullObservationsC
 
         if readings:
             logger.info(f"Readings pulled with success.")
-
             for device, device_readings in readings.items():
                 transformed_data = await filter_and_transform(
                     device,
@@ -138,6 +139,7 @@ async def action_pull_observations(integration, action_config: PullObservationsC
                                 )
                                 response_per_device.append({"device": device, "response": [msg]})
                             else:
+                                total_observations += len(transformed_data)
                                 # Update state
                                 state = {
                                     "latest_device_timestamp": device_readings.pagination.page_end_date
@@ -154,7 +156,7 @@ async def action_pull_observations(integration, action_config: PullObservationsC
         else:
             msg = f'No observations extracted for integration_id: {str(integration.id)}.'
             logger.warning(msg)
-            response_per_device.append({"msg": msg})
+            result["message"] = msg
     except httpx.HTTPError as e:
         message = f"pull_observations action returned error."
         logger.exception(message, extra={
@@ -163,4 +165,6 @@ async def action_pull_observations(integration, action_config: PullObservationsC
         })
         raise e
     else:
-        return response_per_device
+        result["observations_extracted"] = total_observations
+        result["details"] = response_per_device
+        return result
