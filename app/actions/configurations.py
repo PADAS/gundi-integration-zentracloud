@@ -1,9 +1,11 @@
 from typing import List
+from pydantic import SecretStr
+
 from .core import AuthActionConfiguration, PullActionConfiguration
 
 
 class AuthenticateConfig(AuthActionConfiguration):
-    token: str
+    token: SecretStr
 
 
 class PullObservationsConfig(PullActionConfiguration):
