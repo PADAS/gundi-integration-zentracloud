@@ -38,7 +38,7 @@ class PaginationData(pydantic.BaseModel):
     page_end_date: datetime
 
 
-class TahmoWeatherData(pydantic.BaseModel):
+class ZentraCloudData(pydantic.BaseModel):
     air_temperature: List[Reading] = pydantic.Field(..., alias="Air Temperature")
     atmospheric_pressure: List[Reading] = pydantic.Field(..., alias="Atmospheric Pressure")
     battery_percent: List[Reading] = pydantic.Field(..., alias="Battery Percent")
@@ -63,9 +63,9 @@ class TahmoWeatherData(pydantic.BaseModel):
     y_axis_level: List[Reading] = pydantic.Field(..., alias="Y-axis Level")
 
 
-class TahmoWeatherResponse(pydantic.BaseModel):
+class ZentraCloudResponse(pydantic.BaseModel):
     pagination: PaginationData
-    readings: TahmoWeatherData
+    readings: ZentraCloudData
 
 
 class PullObservationsBadConfigException(Exception):
@@ -75,7 +75,7 @@ class PullObservationsBadConfigException(Exception):
         super().__init__(f'{self.status_code}: {self.message}')
 
 
-class TahmoWeatherUnauthorizedException(Exception):
+class ZentraCloudUnauthorizedException(Exception):
     def __init__(self, message: str, status_code=401):
         self.status_code = status_code
         self.message = message
@@ -146,7 +146,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
                     params=params,
                     headers={
                         'Authorization': 'Token {token}'.format(
-                            token=auth_config.token
+                            token=auth_config.token.get_secret_value()
                         )
                     }
                 )
@@ -154,7 +154,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
 
             response = response.json()
 
-            readings = TahmoWeatherResponse.parse_obj({
+            readings = ZentraCloudResponse.parse_obj({
                 "pagination": response.get("pagination"),
                 "readings": response.get("data")
             })
@@ -162,7 +162,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
             readings_per_device[device] = readings
 
     except pydantic.ValidationError as ve:
-        message = f'Error while parsing TAHMO Weather READINGS endpoint. {ve.json()}'
+        message = f'Error while parsing ZentraCloud READINGS endpoint. {ve.json()}'
         logger.exception(
             message,
             extra={
