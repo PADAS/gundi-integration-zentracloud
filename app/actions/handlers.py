@@ -1,6 +1,7 @@
 import datetime
 import httpx
 import logging
+import re
 import stamina
 
 import app.actions.client as client
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 state_manager = IntegrationStateManager()
 
 
+def normalize_sensor_name(name):
+    # Turn a ZentraCloud measurement name into a stable snake_case key, e.g.
+    # "Air Temperature" -> "air_temperature", "X-axis Level" -> "x_axis_level".
+    return re.sub(r"[^0-9a-z]+", "_", name.strip().lower()).strip("_")
+
+
 async def filter_and_transform(device, readings, integration_id, action_id):
     def transform():
         current_log = 0
@@ -28,7 +35,7 @@ async def filter_and_transform(device, readings, integration_id, action_id):
         while current_log < total_logs:
             readings_dict = {}
             reading_datetime = None
-            for reading_type, sensor in readings.readings:
+            for reading_type, sensor in readings.readings.items():
                 # Devices only report the sensors they have, so a sensor type may
                 # be absent (empty list) or have fewer logs than this page.
                 if not sensor or current_log >= len(sensor[0].readings):
@@ -40,9 +47,10 @@ async def filter_and_transform(device, readings, integration_id, action_id):
                     "%Y-%m-%d %H:%M:%S%z"
                 )
 
+                key = normalize_sensor_name(reading_type)
                 readings_dict.update(
                     {
-                        f'{reading_type}_{log_key}': log_value
+                        f'{key}_{log_key}': log_value
                         for log_key, log_value in reading_dict.items()
                         if log_value is not None
                     }

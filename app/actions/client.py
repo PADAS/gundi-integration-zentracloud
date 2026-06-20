@@ -3,7 +3,7 @@ import pydantic
 import httpx
 
 from app.actions.configurations import *
-from typing import List, Optional
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 
 from app.services.errors import ConfigurationNotFound
@@ -38,34 +38,13 @@ class PaginationData(pydantic.BaseModel):
     page_end_date: datetime
 
 
-class ZentraCloudData(pydantic.BaseModel):
-    air_temperature: List[Reading] = pydantic.Field(default_factory=list, alias="Air Temperature")
-    atmospheric_pressure: List[Reading] = pydantic.Field(default_factory=list, alias="Atmospheric Pressure")
-    battery_percent: List[Reading] = pydantic.Field(default_factory=list, alias="Battery Percent")
-    battery_voltage: List[Reading] = pydantic.Field(default_factory=list, alias="Battery Voltage")
-    gust_speed: List[Reading] = pydantic.Field(default_factory=list, alias="Gust Speed")
-    lightning_activity: List[Reading] = pydantic.Field(default_factory=list, alias="Lightning Activity")
-    lightning_distance: List[Reading] = pydantic.Field(default_factory=list, alias="Lightning Distance")
-    logger_temperature: List[Reading] = pydantic.Field(default_factory=list, alias="Logger Temperature")
-    max_precip_rate: List[Reading] = pydantic.Field(default_factory=list, alias="Max Precip Rate")
-    precipitation: List[Reading] = pydantic.Field(default_factory=list, alias="Precipitation")
-    rh_sensor_temp: List[Reading] = pydantic.Field(default_factory=list, alias="RH Sensor Temp")
-    reference_pressure: List[Reading] = pydantic.Field(default_factory=list, alias="Reference Pressure")
-    saturation_extract_ec: List[Reading] = pydantic.Field(default_factory=list, alias="Saturation Extract EC")
-    soil_temperature: List[Reading] = pydantic.Field(default_factory=list, alias="Soil Temperature")
-    solar_radiation: List[Reading] = pydantic.Field(default_factory=list, alias="Solar Radiation")
-    vpd: List[Reading] = pydantic.Field(default_factory=list, alias="VPD")
-    vapor_pressure: List[Reading] = pydantic.Field(default_factory=list, alias="Vapor Pressure")
-    water_content: List[Reading] = pydantic.Field(default_factory=list, alias="Water Content")
-    wind_direction: List[Reading] = pydantic.Field(default_factory=list, alias="Wind Direction")
-    wind_speed: List[Reading] = pydantic.Field(default_factory=list, alias="Wind Speed")
-    x_axis_level: List[Reading] = pydantic.Field(default_factory=list, alias="X-axis Level")
-    y_axis_level: List[Reading] = pydantic.Field(default_factory=list, alias="Y-axis Level")
-
-
 class ZentraCloudResponse(pydantic.BaseModel):
     pagination: PaginationData
-    readings: ZentraCloudData
+    # ZentraCloud returns measurements keyed by name (e.g. "Air Temperature"),
+    # and each device only includes the sensors it actually has. Model it as an
+    # open dict so any sensor set — including ones we haven't seen before — is
+    # accepted and preserved rather than dropped.
+    readings: Dict[str, List[Reading]]
 
 
 class PullObservationsBadConfigException(Exception):

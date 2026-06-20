@@ -44,6 +44,22 @@ async def test_filter_and_transform_with_missing_sensors(mocker):
     assert not any(k.startswith("soil_temperature_") for k in obs["additional"])
 
 
+@pytest.mark.asyncio
+async def test_filter_and_transform_keeps_unknown_sensors(mocker):
+    mocker.patch.object(handlers.state_manager, "get_state", new_callable=mocker.AsyncMock, return_value=None)
+    readings = make_readings(extra={
+        "Brand New Sensor": [{"readings": [{
+            "datetime": "2026-06-20 10:00:00+0000",
+            "value": 7.0, "precision": 1, "mrid": 9, "error_flag": False,
+        }]}],
+    })
+
+    result = await handlers.filter_and_transform("z6-27505", readings, "intid", "pull_observations")
+
+    # Unknown measurement names are normalized to snake_case keys, not dropped.
+    assert result[0]["additional"]["brand_new_sensor_value"] == 7.0
+
+
 class FakeIntegration:
     id = "5185abb5-46ee-41cf-bbe1-d691dd314fc5"
 

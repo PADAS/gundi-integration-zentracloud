@@ -9,27 +9,42 @@ from app.actions.client import (
 from app.actions.configurations import AuthenticateConfig
 
 
-def test_response_parses_when_device_omits_some_sensor_types():
-    # Regression: a weather station (z6-27505) reports only a subset of sensors;
-    # absent sensor types must not raise "field required".
-    resp = ZentraCloudResponse.parse_obj({
+def _response_with(readings):
+    return ZentraCloudResponse.parse_obj({
         "pagination": {
             "page_num_readings": 1,
             "page_start_date": "2026-06-20T10:00:00+00:00",
             "page_end_date": "2026-06-20T10:00:00+00:00",
         },
-        "readings": {
-            "Air Temperature": [{"readings": [{
-                "datetime": "2026-06-20 10:00:00+0000",
-                "value": 21.5, "precision": 1, "mrid": 1, "error_flag": False,
-            }]}],
-        },
+        "readings": readings,
     })
-    assert resp.readings.air_temperature[0].readings[0].value == 21.5
-    # Sensors the device doesn't have default to empty, not a validation error.
-    assert resp.readings.soil_temperature == []
-    assert resp.readings.water_content == []
-    assert resp.readings.saturation_extract_ec == []
+
+
+def test_response_parses_when_device_omits_some_sensor_types():
+    # Regression: a weather station (z6-27505) reports only a subset of sensors;
+    # absent sensor types must not raise "field required".
+    resp = _response_with({
+        "Air Temperature": [{"readings": [{
+            "datetime": "2026-06-20 10:00:00+0000",
+            "value": 21.5, "precision": 1, "mrid": 1, "error_flag": False,
+        }]}],
+    })
+    assert resp.readings["Air Temperature"][0].readings[0].value == 21.5
+    # Sensors the device doesn't have are simply absent, not a validation error.
+    assert "Soil Temperature" not in resp.readings
+
+
+def test_response_keeps_unknown_sensor_types():
+    # Open dict: a measurement name not in the old hardcoded list is retained,
+    # not silently dropped.
+    resp = _response_with({
+        "Brand New Sensor": [{"readings": [{
+            "datetime": "2026-06-20 10:00:00+0000",
+            "value": 7.0, "precision": 1, "mrid": 9, "error_flag": False,
+        }]}],
+    })
+    assert "Brand New Sensor" in resp.readings
+    assert resp.readings["Brand New Sensor"][0].readings[0].value == 7.0
 
 
 def make_config(token="Token abc123", api_url="https://zentracloud.com/api/v4/get_readings/"):
