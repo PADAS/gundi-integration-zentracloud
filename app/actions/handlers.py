@@ -6,9 +6,10 @@ import stamina
 import app.actions.client as client
 import app.services.gundi as gundi_tools
 
-from app.actions.configurations import PullObservationsConfig
+from app.actions.configurations import PullObservationsConfig, AuthenticateConfig
 from app.services.activity_logger import activity_logger
 from app.services.state import IntegrationStateManager
+from app.services.action_scheduler import crontab_schedule
 
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,32 @@ async def filter_and_transform(device, readings, integration_id, action_id):
     return transform()
 
 
+async def action_auth(integration, action_config: AuthenticateConfig):
+    logger.info(f"Executing auth action with integration {integration} and action_config {action_config}...")
+    try:
+        await client.verify_credentials(auth_config=action_config)
+    except client.ZentraCloudUnauthorizedException as e:
+        logger.warning(
+            f"Invalid credentials for integration '{integration.id}': {e.message}"
+        )
+        return {
+            "valid_credentials": False,
+            "status_code": e.status_code,
+            "message": e.message,
+        }
+    except httpx.HTTPError as e:
+        message = "auth action returned error."
+        logger.exception(message, extra={
+            "integration_id": str(integration.id),
+            "attention_needed": True
+        })
+        raise e
+    else:
+        return {"valid_credentials": True}
+
+
 @activity_logger()
+@crontab_schedule("*/5 * * * *")
 async def action_pull_observations(integration, action_config: PullObservationsConfig):
     logger.info(f"Executing pull_observations action with integration {integration} and action_config {action_config}...")
     try:
