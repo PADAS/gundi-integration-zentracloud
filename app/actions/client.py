@@ -110,6 +110,39 @@ def get_pull_observations_config(integration):
     return PullObservationsConfig.parse_obj(config.data)
 
 
+async def verify_credentials(auth_config, session=None):
+    """Check that the token is accepted by the chosen ZentraCloud server.
+
+    Makes a minimal request to the configured get_readings endpoint. The
+    endpoint requires a device_sn, so a valid token without one returns a 4xx
+    that is NOT 401/403 — that still proves the credentials were accepted. Only
+    401/403 mean the token was rejected.
+
+    Returns True on success; raises ZentraCloudUnauthorizedException on 401/403.
+    Connection/transport errors propagate as httpx exceptions.
+    """
+    owns_session = session is None
+    if owns_session:
+        session = httpx.AsyncClient(timeout=120)
+    try:
+        response = await session.get(
+            auth_config.api_url,
+            params={"per_page": 1},
+            headers={"Authorization": auth_config.auth_header},
+        )
+    finally:
+        if owns_session:
+            await session.aclose()
+
+    if response.status_code in (401, 403):
+        raise ZentraCloudUnauthorizedException(
+            message=f"ZentraCloud rejected the credentials for {auth_config.api_url} "
+                    f"(HTTP {response.status_code}).",
+            status_code=response.status_code,
+        )
+    return True
+
+
 async def get_readings_endpoint_response(integration, auth_config, config):
     readings_per_device = {}
     try:
