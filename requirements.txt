@@ -21,7 +21,7 @@ attrs==23.2.0
     # via aiohttp
 backoff==2.2.1
     # via gcloud-aio-auth
-certifi==2024.2.2
+certifi==2024.6.2
     # via
     #   httpcore
     #   httpx
@@ -33,13 +33,13 @@ click==8.1.7
     # via
     #   -r requirements-base.in
     #   uvicorn
-cryptography==42.0.5
+cryptography==42.0.8
     # via gcloud-aio-auth
 environs==9.5.0
     # via
     #   -r requirements-base.in
     #   gundi-client-v2
-exceptiongroup==1.2.2
+exceptiongroup==1.2.1
     # via
     #   anyio
     #   pytest
@@ -49,7 +49,7 @@ frozenlist==1.4.1
     # via
     #   aiohttp
     #   aiosignal
-gcloud-aio-auth==5.3.1
+gcloud-aio-auth==5.3.2
     # via gcloud-aio-pubsub
 gcloud-aio-pubsub==6.0.1
     # via -r requirements-base.in
@@ -76,13 +76,13 @@ idna==3.7
     #   yarl
 iniconfig==2.0.0
     # via pytest
-marshmallow==3.21.1
+marshmallow==3.21.3
     # via environs
 multidict==6.0.5
     # via
     #   aiohttp
     #   yarl
-packaging==24.0
+packaging==24.1
     # via
     #   marshmallow
     #   pytest
@@ -92,7 +92,7 @@ prometheus-client==0.20.0
     # via gcloud-aio-pubsub
 pycparser==2.22
     # via cffi
-pydantic==1.10.15
+pydantic==1.10.17
     # via
     #   -r requirements-base.in
     #   fastapi
@@ -107,7 +107,7 @@ pytest==7.4.4
     #   -r requirements-dev.in
     #   pytest-asyncio
     #   pytest-mock
-pytest-asyncio==0.21.1
+pytest-asyncio==0.21.2
     # via -r requirements-dev.in
 pytest-mock==3.12.0
     # via -r requirements-dev.in
@@ -115,7 +115,7 @@ python-dotenv==1.0.1
     # via environs
 python-json-logger==2.0.7
     # via -r requirements-base.in
-redis==5.0.4
+redis==5.0.7
     # via -r requirements-base.in
 respx==0.20.2
     # via gundi-client-v2
@@ -128,11 +128,11 @@ stamina==23.2.0
     # via -r requirements-base.in
 starlette==0.27.0
     # via fastapi
-tenacity==8.2.3
+tenacity==8.4.2
     # via stamina
-tomli==2.0.2
+tomli==2.2.1
     # via pytest
-typing-extensions==4.11.0
+typing-extensions==4.12.2
     # via
     #   fastapi
     #   pydantic
