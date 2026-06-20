@@ -61,6 +61,30 @@ class ZentraCloudUnauthorizedException(Exception):
         super().__init__(f'{self.status_code}: {self.message}')
 
 
+def raise_for_readings_status(response):
+    """Raise for an error response, distinguishing retryable from non-retryable.
+
+    The pull is wrapped in stamina.retry_context(on=httpx.HTTPError), so:
+    - 5xx / 429 are transient -> raise an httpx error (retried).
+    - 4xx are client errors that won't fix themselves -> raise a non-httpx
+      exception so the retry loop is skipped and we fail fast (GUNDI-5425).
+    """
+    status = response.status_code
+    if status < 400:
+        return
+    if status == 429 or status >= 500:
+        response.raise_for_status()  # httpx.HTTPStatusError -> retryable
+    if status in (401, 403):
+        raise ZentraCloudUnauthorizedException(
+            message=f"ZentraCloud rejected the credentials (HTTP {status}).",
+            status_code=status,
+        )
+    raise PullObservationsBadConfigException(
+        message=f"ZentraCloud returned HTTP {status} for the readings request.",
+        status_code=status,
+    )
+
+
 def get_auth_config(integration):
     # Look for the login credentials, needed for any action
     auth_config = find_config_for_action(
@@ -158,7 +182,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
                     params=params,
                     headers={'Authorization': auth_config.auth_header}
                 )
-                response.raise_for_status()
+                raise_for_readings_status(response)
 
             response = response.json()
 
