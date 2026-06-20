@@ -1,6 +1,7 @@
 import datetime
 import httpx
 import logging
+import re
 import stamina
 
 import app.actions.client as client
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 state_manager = IntegrationStateManager()
 
 
+def normalize_sensor_name(name):
+    # Turn a ZentraCloud measurement name into a stable snake_case key, e.g.
+    # "Air Temperature" -> "air_temperature", "X-axis Level" -> "x_axis_level".
+    return re.sub(r"[^0-9a-z]+", "_", name.strip().lower()).strip("_")
+
+
 async def filter_and_transform(device, readings, integration_id, action_id):
     def transform():
         current_log = 0
@@ -27,34 +34,40 @@ async def filter_and_transform(device, readings, integration_id, action_id):
 
         while current_log < total_logs:
             readings_dict = {}
-            for reading in readings.readings:
-                reading_type = reading[0]
-                reading_dict = reading[1][0].readings[current_log].dict()
+            reading_datetime = None
+            for reading_type, sensor in readings.readings.items():
+                # Devices only report the sensors they have, so a sensor type may
+                # be absent (empty list) or have fewer logs than this page.
+                if not sensor or current_log >= len(sensor[0].readings):
+                    continue
+                reading_dict = sensor[0].readings[current_log].dict()
 
                 reading_datetime = datetime.datetime.strptime(
                     reading_dict.pop("reading_datetime"),
                     "%Y-%m-%d %H:%M:%S%z"
                 )
 
+                key = normalize_sensor_name(reading_type)
                 readings_dict.update(
                     {
-                        f'{reading_type}_{log_key}': log_value
+                        f'{key}_{log_key}': log_value
                         for log_key, log_value in reading_dict.items()
                         if log_value is not None
                     }
                 )
 
-            transformed_data.append(
-                {
-                    "source": device,
-                    "source_name": device,
-                    'type': "stationary-object",
-                    "subtype": "weather_station",
-                    "recorded_at": reading_datetime,
-                    "location": {"lat": 0.0, "lon": 0.0},  # Just to avoid 400 after posting to ER
-                    "additional": readings_dict
-                }
-            )
+            if reading_datetime is not None and readings_dict:
+                transformed_data.append(
+                    {
+                        "source": device,
+                        "source_name": device,
+                        'type': "stationary-object",
+                        "subtype": "weather_station",
+                        "recorded_at": reading_datetime,
+                        "location": {"lat": 0.0, "lon": 0.0},  # Just to avoid 400 after posting to ER
+                        "additional": readings_dict
+                    }
+                )
 
             current_log += 1
 
