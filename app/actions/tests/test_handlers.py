@@ -66,8 +66,8 @@ class FakeIntegration:
 
 def make_config():
     return AuthenticateConfig.parse_obj({
-        "token": "Token abc123",
-        "api_url": "https://tahmo.zentracloud.com/api/v4/get_readings/",
+        "token": "abc123",
+        "api_url": "https://tahmo.zentracloud.com",
     })
 
 

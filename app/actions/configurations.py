@@ -7,30 +7,32 @@ from .core import AuthActionConfiguration, PullActionConfiguration, ExecutableAc
 
 
 class ZentraCloudServer(str, Enum):
-    # ZentraCloud's regional get_readings endpoints. Each server is paired with
-    # its own account token, so the choice lives with the credentials.
-    US = "https://zentracloud.com/api/v4/get_readings/"
-    EU = "https://zentracloud.eu/api/v4/get_readings/"
-    TAHMO = "https://tahmo.zentracloud.com/api/v4/get_readings/"
+    # ZentraCloud's regional servers. Each is paired with its own account token,
+    # so the choice lives with the credentials. Stored as the server base only;
+    # the get_readings path is appended by the client (see readings_url).
+    US = "https://zentracloud.com"
+    EU = "https://zentracloud.eu"
+    TAHMO = "https://tahmo.zentracloud.com"
 
 
-# Choices rendered as an inline JSON-schema enum (value -> label). The Gundi
-# portal does not dereference $ref, so a Pydantic Enum-typed field (which emits
-# allOf/$ref) won't render as a choice control. A plain str field with an inline
-# `enum` renders as a select, while the validator below keeps the value
-# constrained to the known servers server-side.
+# Rendered as an inline JSON-schema enum (value -> label). The Gundi portal does
+# not dereference $ref, so a plain str field with an inline `enum` is used (a
+# Pydantic Enum-typed field would emit allOf/$ref and not render as a select).
 SERVER_LABELS = {
     ZentraCloudServer.US.value: "ZentraCloud US",
     ZentraCloudServer.EU.value: "ZentraCloud EU",
     ZentraCloudServer.TAHMO.value: "TAHMO",
 }
 
+# Path appended to the selected server to reach the readings endpoint.
+READINGS_PATH = "api/v4/get_readings/"
+
 
 class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     token: SecretStr = FieldWithUIOptions(
         ...,
         title="Token",
-        description="ZentraCloud API token.",
+        description="Your ZentraCloud API token (just the token value, without a 'Token ' prefix).",
         ui_options=UIOptions(
             widget="password",
         ),
@@ -52,18 +54,29 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
 
     @validator("api_url")
     def api_url_must_be_known_server(cls, value):
-        if value not in SERVER_LABELS:
+        server = value.rstrip("/")
+        # Tolerate a previously-stored full readings URL by reducing it to the
+        # server base, so existing integrations keep working until re-selected.
+        suffix = "/" + READINGS_PATH.strip("/")
+        if server.endswith(suffix):
+            server = server[: -len(suffix)]
+        if server not in SERVER_LABELS:
             raise ValueError(
                 f"api_url must be one of the known ZentraCloud servers: "
                 f"{', '.join(SERVER_LABELS)}"
             )
-        return value
+        return server
+
+    @property
+    def readings_url(self) -> str:
+        # The user selects only the server; append the get_readings path here.
+        return f"{self.api_url.rstrip('/')}/{READINGS_PATH}"
 
     @property
     def auth_header(self) -> str:
-        # ZentraCloud expects "Authorization: Token <token>". The token is
-        # sometimes entered in the portal already including the "Token " prefix,
-        # so normalize to exactly one prefix to avoid a "Token Token ..." 401.
+        # ZentraCloud expects "Authorization: Token <token>". Users enter just
+        # the token value; we add the prefix here. A stray "Token " prefix is
+        # tolerated to avoid a "Token Token ..." 401.
         token = self.token.get_secret_value().strip()
         if token.lower().startswith("token "):
             token = token.split(" ", 1)[1].strip()

@@ -47,7 +47,7 @@ def test_response_keeps_unknown_sensor_types():
     assert resp.readings["Brand New Sensor"][0].readings[0].value == 7.0
 
 
-def make_config(token="Token abc123", api_url="https://zentracloud.com/api/v4/get_readings/"):
+def make_config(token="abc123", api_url="https://zentracloud.com"):
     return AuthenticateConfig.parse_obj({"token": token, "api_url": api_url})
 
 
@@ -89,7 +89,7 @@ async def test_verify_credentials_sends_normalized_header_to_chosen_server():
 
     session = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     await verify_credentials(
-        make_config(token="Token abc123", api_url="https://tahmo.zentracloud.com/api/v4/get_readings/"),
+        make_config(token="abc123", api_url="https://tahmo.zentracloud.com"),
         session=session,
     )
     assert captured["auth"] == "Token abc123"
