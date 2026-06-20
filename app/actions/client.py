@@ -144,11 +144,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
                 response = await session.get(
                     url,
                     params=params,
-                    headers={
-                        'Authorization': 'Token {token}'.format(
-                            token=auth_config.token.get_secret_value()
-                        )
-                    }
+                    headers={'Authorization': auth_config.auth_header}
                 )
                 response.raise_for_status()
 
