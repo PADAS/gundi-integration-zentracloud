@@ -3,7 +3,7 @@ from typing import List
 from pydantic import SecretStr, Field, validator
 
 from app.services.utils import FieldWithUIOptions, UIOptions, GlobalUISchemaOptions
-from .core import AuthActionConfiguration, PullActionConfiguration
+from .core import AuthActionConfiguration, PullActionConfiguration, ExecutableActionMixin
 
 
 class ZentraCloudServer(str, Enum):
@@ -26,7 +26,7 @@ SERVER_LABELS = {
 }
 
 
-class AuthenticateConfig(AuthActionConfiguration):
+class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     token: SecretStr = FieldWithUIOptions(
         ...,
         title="Token",

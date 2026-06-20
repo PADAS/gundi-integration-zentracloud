@@ -2,6 +2,14 @@ import pytest
 import pydantic
 
 from app.actions.configurations import AuthenticateConfig, ZentraCloudServer
+from app.actions.core import ExecutableActionMixin
+
+
+def test_auth_config_is_executable():
+    # self_registration sets action_schema["is_executable"]=True for
+    # ExecutableActionMixin subclasses, which makes the portal render the
+    # "Test" button so the credential check can be triggered on demand.
+    assert issubclass(AuthenticateConfig, ExecutableActionMixin)
 
 
 def test_authenticate_config_defaults_to_us_server():
