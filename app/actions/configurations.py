@@ -6,9 +6,6 @@ from .core import AuthActionConfiguration, PullActionConfiguration
 
 class AuthenticateConfig(AuthActionConfiguration):
     token: SecretStr
-
-
-class PullObservationsConfig(PullActionConfiguration):
     api_url: HttpUrl = Field(
         "https://zentracloud.com/api/v4/get_readings/",
         title="API URL",
@@ -16,6 +13,8 @@ class PullObservationsConfig(PullActionConfiguration):
                     "(e.g. US: zentracloud.com, EU, or the TAHMO server)."
     )
 
+
+class PullObservationsConfig(PullActionConfiguration):
     devices_serial_number: List[str] = Field(
         ...,
         title="Devices by Serial Number",
