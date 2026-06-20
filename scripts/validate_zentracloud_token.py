@@ -43,7 +43,38 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def validate(token, server, device_sn=None, per_page=1, timeout=30.0):
+def interpret_status(status, has_device_sn):
+    """Map an HTTP status to (exit_code, symbol, message).
+
+    The tool answers one question: did the server reject the token?
+    Only 401/403 mean the token is invalid. Any other response means auth
+    passed, so the token works even if the specific request had other issues
+    (e.g. a bad device_sn returns 4xx with a perfectly valid token).
+    """
+    if status == 200:
+        return 0, "✓", "Token is valid and the server returned data (HTTP 200)."
+    if status in (401, 403):
+        return 1, "✗", (
+            f"Authentication failed (HTTP {status}). "
+            "The token is invalid, expired, or for a different server."
+        )
+    if status in (400, 422) and not has_device_sn:
+        return 0, "✓", (
+            f"Token accepted (HTTP {status} is the expected 'missing device_sn' response). "
+            "Re-run with --device-sn <serial> for a full end-to-end check."
+        )
+    if status < 500:
+        return 0, "✓", (
+            f"Token accepted; the request returned HTTP {status} (not an auth error). "
+            "This usually means a request-level issue such as an unknown device_sn."
+        )
+    return 0, "?", (
+        f"Server error (HTTP {status}); the token was not rejected, "
+        "but the result is inconclusive — try again later."
+    )
+
+
+def validate(token, server, device_sn=None, per_page=1, timeout=30.0, client=None):
     config = AuthenticateConfig(token=token, api_url=SERVER_CHOICES[server])
     url = config.api_url
     headers = {"Authorization": config.auth_header}
@@ -58,27 +89,23 @@ def validate(token, server, device_sn=None, per_page=1, timeout=30.0):
     print(f"→ GET {url}")
     print(f"  server={server}  device_sn={device_sn or '(none)'}")
 
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(timeout=timeout)
     try:
-        response = httpx.get(url, params=params, headers=headers, timeout=timeout)
+        response = client.get(url, params=params, headers=headers)
     except httpx.HTTPError as exc:
         print(f"✗ Could not reach the server: {exc!r}")
         return 2
+    finally:
+        if owns_client:
+            client.close()
 
-    status = response.status_code
-    if status == 200:
-        print("✓ Token is valid and the server returned data (HTTP 200).")
-        return 0
-    if status in (401, 403):
-        print(f"✗ Authentication failed (HTTP {status}). The token is invalid, expired, or for a different server.")
+    code, symbol, message = interpret_status(response.status_code, has_device_sn=bool(device_sn))
+    print(f"{symbol} {message}")
+    if code != 0 or symbol != "✓":
         print(f"  response: {response.text[:300]}")
-        return 1
-    if status in (400, 422) and not device_sn:
-        print(f"✓ Token accepted (HTTP {status} is the expected 'missing device_sn' response).")
-        print("  Re-run with --device-sn <serial> for a full end-to-end check.")
-        return 0
-    print(f"? Unexpected response (HTTP {status}). Token likely accepted; inspect the body:")
-    print(f"  response: {response.text[:300]}")
-    return 0 if status < 400 else 1
+    return code
 
 
 def main(argv=None):
