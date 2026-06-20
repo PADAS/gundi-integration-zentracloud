@@ -27,9 +27,13 @@ async def filter_and_transform(device, readings, integration_id, action_id):
 
         while current_log < total_logs:
             readings_dict = {}
-            for reading in readings.readings:
-                reading_type = reading[0]
-                reading_dict = reading[1][0].readings[current_log].dict()
+            reading_datetime = None
+            for reading_type, sensor in readings.readings:
+                # Devices only report the sensors they have, so a sensor type may
+                # be absent (empty list) or have fewer logs than this page.
+                if not sensor or current_log >= len(sensor[0].readings):
+                    continue
+                reading_dict = sensor[0].readings[current_log].dict()
 
                 reading_datetime = datetime.datetime.strptime(
                     reading_dict.pop("reading_datetime"),
@@ -44,17 +48,18 @@ async def filter_and_transform(device, readings, integration_id, action_id):
                     }
                 )
 
-            transformed_data.append(
-                {
-                    "source": device,
-                    "source_name": device,
-                    'type': "stationary-object",
-                    "subtype": "weather_station",
-                    "recorded_at": reading_datetime,
-                    "location": {"lat": 0.0, "lon": 0.0},  # Just to avoid 400 after posting to ER
-                    "additional": readings_dict
-                }
-            )
+            if reading_datetime is not None and readings_dict:
+                transformed_data.append(
+                    {
+                        "source": device,
+                        "source_name": device,
+                        'type': "stationary-object",
+                        "subtype": "weather_station",
+                        "recorded_at": reading_datetime,
+                        "location": {"lat": 0.0, "lon": 0.0},  # Just to avoid 400 after posting to ER
+                        "additional": readings_dict
+                    }
+                )
 
             current_log += 1
 

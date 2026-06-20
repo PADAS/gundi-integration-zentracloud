@@ -1,8 +1,35 @@
 import httpx
 import pytest
 
-from app.actions.client import verify_credentials, ZentraCloudUnauthorizedException
+from app.actions.client import (
+    verify_credentials,
+    ZentraCloudUnauthorizedException,
+    ZentraCloudResponse,
+)
 from app.actions.configurations import AuthenticateConfig
+
+
+def test_response_parses_when_device_omits_some_sensor_types():
+    # Regression: a weather station (z6-27505) reports only a subset of sensors;
+    # absent sensor types must not raise "field required".
+    resp = ZentraCloudResponse.parse_obj({
+        "pagination": {
+            "page_num_readings": 1,
+            "page_start_date": "2026-06-20T10:00:00+00:00",
+            "page_end_date": "2026-06-20T10:00:00+00:00",
+        },
+        "readings": {
+            "Air Temperature": [{"readings": [{
+                "datetime": "2026-06-20 10:00:00+0000",
+                "value": 21.5, "precision": 1, "mrid": 1, "error_flag": False,
+            }]}],
+        },
+    })
+    assert resp.readings.air_temperature[0].readings[0].value == 21.5
+    # Sensors the device doesn't have default to empty, not a validation error.
+    assert resp.readings.soil_temperature == []
+    assert resp.readings.water_content == []
+    assert resp.readings.saturation_extract_ec == []
 
 
 def make_config(token="Token abc123", api_url="https://zentracloud.com/api/v4/get_readings/"):
