@@ -105,7 +105,7 @@ async def verify_credentials(auth_config, session=None):
         session = httpx.AsyncClient(timeout=120)
     try:
         response = await session.get(
-            auth_config.api_url,
+            auth_config.readings_url,
             params={"per_page": 1},
             headers={"Authorization": auth_config.auth_header},
         )
@@ -125,7 +125,7 @@ async def verify_credentials(auth_config, session=None):
 async def get_readings_endpoint_response(integration, auth_config, config):
     readings_per_device = {}
     try:
-        url = auth_config.api_url
+        url = auth_config.readings_url
 
         for device in config.devices_serial_number:
             # Get current state for the device

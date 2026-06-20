@@ -76,7 +76,7 @@ def interpret_status(status, has_device_sn):
 
 def validate(token, server, device_sn=None, per_page=1, timeout=30.0, client=None):
     config = AuthenticateConfig(token=token, api_url=SERVER_CHOICES[server])
-    url = config.api_url
+    url = config.readings_url
     headers = {"Authorization": config.auth_header}
 
     params = {
