@@ -20,15 +20,14 @@ def test_authenticate_config_accepts_tahmo_server():
     assert config.api_url == ZentraCloudServer.TAHMO
 
 
-def test_authenticate_config_accepts_arbitrary_url():
-    # Free-text field: any valid http(s) URL is accepted (e.g. a server not in
-    # the predefined list). Constraint is only that it is a real URL.
-    config = AuthenticateConfig.parse_obj({
-        "token": "Token abc123",
-        "api_url": "https://example.com/api/v4/get_readings/",
-    })
-
-    assert config.api_url == "https://example.com/api/v4/get_readings/"
+def test_authenticate_config_rejects_unknown_server():
+    # Select list: only the known ZentraCloud servers (US/EU/TAHMO) are valid;
+    # an arbitrary URL must be rejected rather than silently used.
+    with pytest.raises(pydantic.ValidationError):
+        AuthenticateConfig.parse_obj({
+            "token": "Token abc123",
+            "api_url": "https://example.com/api/v4/get_readings/",
+        })
 
 
 def test_authenticate_config_rejects_empty_api_url():
@@ -39,12 +38,13 @@ def test_authenticate_config_rejects_empty_api_url():
         })
 
 
-def test_authenticate_config_rejects_url_without_scheme():
-    with pytest.raises(pydantic.ValidationError):
-        AuthenticateConfig.parse_obj({
-            "token": "Token abc123",
-            "api_url": "zentracloud.com/api/v4/get_readings/",
-        })
+def test_authenticate_config_renders_as_inline_enum_select():
+    # The portal does not dereference $ref, so the choices must be an inline
+    # JSON-schema enum (not allOf/$ref from a Pydantic Enum-typed field).
+    prop = AuthenticateConfig.schema()["properties"]["api_url"]
+    assert prop.get("enum") == [s.value for s in ZentraCloudServer]
+    assert "allOf" not in prop and "$ref" not in prop
+    assert AuthenticateConfig.ui_schema()["api_url"]["ui:widget"] == "select"
 
 
 def test_auth_header_normalizes_token_without_prefix():
