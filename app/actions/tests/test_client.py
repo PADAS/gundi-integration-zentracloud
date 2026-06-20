@@ -1,12 +1,83 @@
+import datetime
+
 import httpx
 import pytest
+import stamina
 
 from app.actions.client import (
     verify_credentials,
+    raise_for_readings_status,
     ZentraCloudUnauthorizedException,
+    PullObservationsBadConfigException,
     ZentraCloudResponse,
 )
 from app.actions.configurations import AuthenticateConfig
+
+
+def _resp(status):
+    return httpx.Response(status, request=httpx.Request("GET", "https://zentracloud.com/api/v4/get_readings/"))
+
+
+def test_non_retryable_errors_are_not_httpx_errors():
+    # The pull retries on=httpx.HTTPError, so for an error to fail fast it must
+    # NOT be an httpx error. This is what makes 4xx skip the retry loop.
+    assert not issubclass(ZentraCloudUnauthorizedException, httpx.HTTPError)
+    assert not issubclass(PullObservationsBadConfigException, httpx.HTTPError)
+
+
+def test_readings_status_ok_does_not_raise():
+    raise_for_readings_status(_resp(200))
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_readings_status_auth_errors_are_non_retryable(status):
+    with pytest.raises(ZentraCloudUnauthorizedException):
+        raise_for_readings_status(_resp(status))
+
+
+@pytest.mark.parametrize("status", [400, 404, 422])
+def test_readings_status_other_4xx_are_non_retryable(status):
+    with pytest.raises(PullObservationsBadConfigException):
+        raise_for_readings_status(_resp(status))
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_readings_status_transient_raise_httpx_error(status):
+    # 5xx / 429 stay retryable (httpx.HTTPError), so stamina keeps retrying them.
+    with pytest.raises(httpx.HTTPError):
+        raise_for_readings_status(_resp(status))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exc", [
+    ZentraCloudUnauthorizedException(message="x", status_code=401),
+    PullObservationsBadConfigException(message="bad", status_code=400),
+])
+async def test_non_retryable_errors_fail_after_single_attempt(exc):
+    attempts = 0
+    with pytest.raises(type(exc)):
+        async for attempt in stamina.retry_context(
+            on=httpx.HTTPError, attempts=3,
+            wait_initial=datetime.timedelta(0), wait_max=datetime.timedelta(0),
+        ):
+            with attempt:
+                attempts += 1
+                raise exc
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_transient_httpx_error_is_retried_three_times():
+    attempts = 0
+    with pytest.raises(httpx.HTTPError):
+        async for attempt in stamina.retry_context(
+            on=httpx.HTTPError, attempts=3,
+            wait_initial=datetime.timedelta(0), wait_max=datetime.timedelta(0),
+        ):
+            with attempt:
+                attempts += 1
+                raise httpx.ConnectError("boom")
+    assert attempts == 3
 
 
 def _response_with(readings):
