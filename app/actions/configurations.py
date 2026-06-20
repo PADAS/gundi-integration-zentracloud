@@ -2,7 +2,7 @@ from enum import Enum
 from typing import List
 from pydantic import SecretStr, Field
 
-from app.services.utils import FieldWithUIOptions, UIOptions
+from app.services.utils import FieldWithUIOptions, UIOptions, GlobalUISchemaOptions
 from .core import AuthActionConfiguration, PullActionConfiguration
 
 
@@ -15,7 +15,14 @@ class ZentraCloudServer(str, Enum):
 
 
 class AuthenticateConfig(AuthActionConfiguration):
-    token: SecretStr
+    token: SecretStr = FieldWithUIOptions(
+        ...,
+        title="Token",
+        description="ZentraCloud API token.",
+        ui_options=UIOptions(
+            widget="password",
+        ),
+    )
     api_url: ZentraCloudServer = FieldWithUIOptions(
         ZentraCloudServer.US,
         title="API URL",
@@ -24,6 +31,10 @@ class AuthenticateConfig(AuthActionConfiguration):
             widget="select",
             enumNames=["ZentraCloud US", "ZentraCloud EU", "TAHMO"],
         ),
+    )
+
+    ui_global_options = GlobalUISchemaOptions(
+        order=["api_url", "token"],
     )
 
     @property
