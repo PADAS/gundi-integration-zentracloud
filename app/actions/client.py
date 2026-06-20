@@ -113,7 +113,7 @@ def get_pull_observations_config(integration):
 async def get_readings_endpoint_response(integration, auth_config, config):
     readings_per_device = {}
     try:
-        url = integration.base_url
+        url = auth_config.api_url
 
         for device in config.devices_serial_number:
             # Get current state for the device
@@ -144,11 +144,7 @@ async def get_readings_endpoint_response(integration, auth_config, config):
                 response = await session.get(
                     url,
                     params=params,
-                    headers={
-                        'Authorization': 'Token {token}'.format(
-                            token=auth_config.token.get_secret_value()
-                        )
-                    }
+                    headers={'Authorization': auth_config.auth_header}
                 )
                 response.raise_for_status()
 
