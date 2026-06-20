@@ -28,7 +28,7 @@ class AuthenticateConfig(AuthActionConfiguration):
         title="API URL",
         description="ZentraCloud server hosting your devices.",
         ui_options=UIOptions(
-            widget="select",
+            widget="radio",
             enumNames=["ZentraCloud US", "ZentraCloud EU", "TAHMO"],
         ),
     )
