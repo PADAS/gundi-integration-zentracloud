@@ -96,6 +96,12 @@ def raise_for_readings_status(response):
 DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60
 RATE_LIMIT_WAIT_BUFFER_SECONDS = 2  # wake up just after the lockout, not on its edge
 MAX_RATE_LIMIT_RETRIES = 3  # per device, per action run
+# Clamp the server-reported wait. The floor stops a "0 seconds" hint from
+# burning a retry on an instant re-request; the ceiling stops a bogus or huge
+# hint (e.g. "expires in 99999 seconds") from parking the whole action until the
+# MAX_ACTION_EXECUTION_TIME ack timeout kills it mid-loop.
+MIN_RATE_LIMIT_WAIT_SECONDS = 1
+MAX_RATE_LIMIT_WAIT_SECONDS = 120
 _LOCKOUT_RE = re.compile(r"expires in (\d+)\s*second", re.IGNORECASE)
 
 
@@ -104,19 +110,23 @@ def _rate_limit_wait_seconds(response, default=DEFAULT_RATE_LIMIT_WAIT_SECONDS):
 
     Prefers the standard ``Retry-After`` header (seconds form); falls back to
     parsing ZentraCloud's ``Lock out expires in N seconds`` detail; finally
-    falls back to ``default``.
+    falls back to ``default``. The result is clamped to
+    ``[MIN_RATE_LIMIT_WAIT_SECONDS, MAX_RATE_LIMIT_WAIT_SECONDS]`` so a missing,
+    zero, or absurd hint can't waste a retry or stall the action past its timeout.
     """
+    raw = default
     retry_after = (response.headers.get("Retry-After") or "").strip()
     if retry_after.isdigit():
-        return int(retry_after)
-    try:
-        detail = response.json().get("detail", "")
-    except Exception:
-        detail = response.text or ""
-    match = _LOCKOUT_RE.search(detail or "")
-    if match:
-        return int(match.group(1))
-    return default
+        raw = int(retry_after)
+    else:
+        try:
+            detail = response.json().get("detail", "")
+        except Exception:
+            detail = response.text or ""
+        match = _LOCKOUT_RE.search(detail or "")
+        if match:
+            raw = int(match.group(1))
+    return max(MIN_RATE_LIMIT_WAIT_SECONDS, min(raw, MAX_RATE_LIMIT_WAIT_SECONDS))
 
 
 async def _get_device_readings(url, params, headers, integration_id, device, session=None):

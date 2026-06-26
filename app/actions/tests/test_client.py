@@ -193,6 +193,29 @@ def test_rate_limit_wait_falls_back_to_default():
     assert _rate_limit_wait_seconds(response, default=99) == 99
 
 
+def test_rate_limit_wait_floors_zero_hint():
+    # A "0 seconds" / Retry-After: 0 hint must not produce an instant re-request
+    # that wastes a retry; it is floored to MIN_RATE_LIMIT_WAIT_SECONDS.
+    from app.actions.client import MIN_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, headers={"Retry-After": "0"})
+    ) == MIN_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, json={"detail": "Lock out expires in 0 seconds."})
+    ) == MIN_RATE_LIMIT_WAIT_SECONDS
+
+
+def test_rate_limit_wait_caps_absurd_hint():
+    # A bogus/huge hint must not park the action past its execution timeout.
+    from app.actions.client import MAX_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, json={"detail": "Lock out expires in 99999 seconds."})
+    ) == MAX_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, headers={"Retry-After": "100000"})
+    ) == MAX_RATE_LIMIT_WAIT_SECONDS
+
+
 @pytest.mark.asyncio
 async def test_get_device_readings_waits_then_succeeds_on_429(mocker):
     # First call is throttled, second succeeds: the device must NOT be lost,
