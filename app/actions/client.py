@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import re
 import pydantic
 import httpx
 
@@ -83,6 +85,80 @@ def raise_for_readings_status(response):
         message=f"ZentraCloud returned HTTP {status} for the readings request.",
         status_code=status,
     )
+
+
+# ZentraCloud rate-limit handling. Some servers (notably TAHMO) enforce a tight
+# "1 call per 60 seconds" limit and answer with HTTP 429 plus a body hint like
+# "Lock out expires in 41 seconds.". Rather than letting 429 ride the coarse
+# whole-batch retry (raise_for_readings_status treats it as transient), we wait
+# out the lockout and retry the single device, so a throttled device neither
+# aborts the batch nor re-triggers already-fetched devices.
+DEFAULT_RATE_LIMIT_WAIT_SECONDS = 60
+RATE_LIMIT_WAIT_BUFFER_SECONDS = 2  # wake up just after the lockout, not on its edge
+MAX_RATE_LIMIT_RETRIES = 3  # per device, per action run
+_LOCKOUT_RE = re.compile(r"expires in (\d+)\s*second", re.IGNORECASE)
+
+
+def _rate_limit_wait_seconds(response, default=DEFAULT_RATE_LIMIT_WAIT_SECONDS):
+    """Seconds to wait before retrying after a 429, from the server's own hints.
+
+    Prefers the standard ``Retry-After`` header (seconds form); falls back to
+    parsing ZentraCloud's ``Lock out expires in N seconds`` detail; finally
+    falls back to ``default``.
+    """
+    retry_after = (response.headers.get("Retry-After") or "").strip()
+    if retry_after.isdigit():
+        return int(retry_after)
+    try:
+        detail = response.json().get("detail", "")
+    except Exception:
+        detail = response.text or ""
+    match = _LOCKOUT_RE.search(detail or "")
+    if match:
+        return int(match.group(1))
+    return default
+
+
+async def _get_device_readings(url, params, headers, integration_id, device, session=None):
+    """GET one device's readings, waiting out ZentraCloud rate-limits (HTTP 429).
+
+    Returns the parsed JSON on success, or ``None`` if the device is still
+    rate-limited after ``MAX_RATE_LIMIT_RETRIES`` (skip it this cycle; the next
+    scheduled run picks it up). Every non-429 response is classified by
+    ``raise_for_readings_status`` (GUNDI-5425): 401/403 and other 4xx fail fast,
+    5xx stay retryable via the outer stamina loop.
+    """
+    owns_session = session is None
+    if owns_session:
+        session = httpx.AsyncClient(timeout=120)
+    try:
+        for attempt in range(1, MAX_RATE_LIMIT_RETRIES + 1):
+            response = await session.get(url, params=params, headers=headers)
+
+            if response.status_code == 429:
+                if attempt == MAX_RATE_LIMIT_RETRIES:
+                    logger.warning(
+                        f"Device '{device}' still rate-limited (HTTP 429) after "
+                        f"{attempt} attempts; skipping it this cycle.",
+                        extra={"integration_id": integration_id, "attention_needed": True},
+                    )
+                    return None
+                wait = _rate_limit_wait_seconds(response) + RATE_LIMIT_WAIT_BUFFER_SECONDS
+                logger.info(
+                    f"ZentraCloud rate-limited device '{device}' (HTTP 429); waiting "
+                    f"{wait}s before retry {attempt + 1}/{MAX_RATE_LIMIT_RETRIES}.",
+                    extra={"integration_id": integration_id},
+                )
+                await asyncio.sleep(wait)
+                continue
+
+            raise_for_readings_status(response)
+            return response.json()
+
+        return None
+    finally:
+        if owns_session:
+            await session.aclose()
 
 
 def get_auth_config(integration):
@@ -176,15 +252,17 @@ async def get_readings_endpoint_response(integration, auth_config, config):
                 "start_date": latest_device_timestamp
             }
 
-            async with httpx.AsyncClient(timeout=120) as session:
-                response = await session.get(
-                    url,
-                    params=params,
-                    headers={'Authorization': auth_config.auth_header}
-                )
-                raise_for_readings_status(response)
+            response = await _get_device_readings(
+                url=url,
+                params=params,
+                headers={'Authorization': auth_config.auth_header},
+                integration_id=str(integration.id),
+                device=device,
+            )
 
-            response = response.json()
+            if response is None:
+                # Device still rate-limited after retries; skip it this cycle.
+                continue
 
             readings = ZentraCloudResponse.parse_obj({
                 "pagination": response.get("pagination"),

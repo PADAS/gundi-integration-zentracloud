@@ -100,3 +100,50 @@ async def test_action_auth_raises_on_transport_error(mocker):
 
     with pytest.raises(httpx.HTTPError):
         await handlers.action_auth(FakeIntegration(), make_config())
+
+
+class _PullCfg:
+    def __init__(self, devices):
+        self.devices_serial_number = devices
+        self.devices_per_page = 1000
+
+    def dict(self):
+        return {"devices_serial_number": self.devices_serial_number, "devices_per_page": self.devices_per_page}
+
+
+def _patch_pull_deps(mocker, *, devices, returned):
+    # Silence the activity_logger decorator's pubsub publishes.
+    mocker.patch("app.services.activity_logger.publish_event", new_callable=mocker.AsyncMock)
+    mocker.patch.object(handlers.client, "get_auth_config", return_value=object())
+    mocker.patch.object(handlers.client, "get_pull_observations_config", return_value=_PullCfg(devices))
+    mocker.patch.object(
+        handlers.client, "get_readings_endpoint_response",
+        new_callable=mocker.AsyncMock, return_value={d: object() for d in returned},
+    )
+    # Isolate the summary logic from the transform/send path.
+    mocker.patch.object(handlers, "filter_and_transform", new_callable=mocker.AsyncMock, return_value=[])
+    return mocker.patch.object(handlers, "log_action_activity", new_callable=mocker.AsyncMock)
+
+
+@pytest.mark.asyncio
+async def test_pull_logs_one_collapsed_summary_for_rate_limited_devices(mocker):
+    # Two of three devices were dropped by the client (persistent 429). We expect
+    # exactly ONE summary activity log naming them — not one error per device.
+    summary = _patch_pull_deps(mocker, devices=["z6-1", "z6-2", "z6-3"], returned=["z6-1"])
+
+    await handlers.action_pull_observations(integration=FakeIntegration(), action_config=make_config())
+
+    summary.assert_awaited_once()
+    kwargs = summary.await_args.kwargs
+    assert kwargs["level"] == "INFO"
+    assert sorted(kwargs["data"]["rate_limited_devices"]) == ["z6-2", "z6-3"]
+
+
+@pytest.mark.asyncio
+async def test_pull_logs_no_summary_when_all_devices_returned(mocker):
+    # No device was rate-limited → no summary activity log at all.
+    summary = _patch_pull_deps(mocker, devices=["z6-1", "z6-2"], returned=["z6-1", "z6-2"])
+
+    await handlers.action_pull_observations(integration=FakeIntegration(), action_config=make_config())
+
+    summary.assert_not_awaited()

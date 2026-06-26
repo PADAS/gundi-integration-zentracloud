@@ -8,7 +8,7 @@ import app.actions.client as client
 import app.services.gundi as gundi_tools
 
 from app.actions.configurations import PullObservationsConfig, AuthenticateConfig
-from app.services.activity_logger import activity_logger
+from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.state import IntegrationStateManager
 from app.services.action_scheduler import crontab_schedule
 
@@ -129,6 +129,7 @@ async def action_pull_observations(integration, action_config: PullObservationsC
         result = {"observations_extracted": 0, "details": {}}
         response_per_device = []
         total_observations = 0
+        pull_config = client.get_pull_observations_config(integration)
         async for attempt in stamina.retry_context(
                 on=httpx.HTTPError,
                 attempts=3,
@@ -139,8 +140,31 @@ async def action_pull_observations(integration, action_config: PullObservationsC
                 readings = await client.get_readings_endpoint_response(
                     integration=integration,
                     auth_config=client.get_auth_config(integration),
-                    config=client.get_pull_observations_config(integration)
+                    config=pull_config
                 )
+
+        # Devices the client dropped this cycle because ZentraCloud kept
+        # rate-limiting them (HTTP 429). This is an expected, self-healing
+        # condition on rate-limited servers (e.g. TAHMO), so instead of an
+        # error-per-occurrence we emit at most ONE collapsed activity log per
+        # run. The next scheduled run retries them.
+        rate_limited_devices = [
+            device for device in pull_config.devices_serial_number
+            if device not in (readings or {})
+        ]
+        if rate_limited_devices:
+            await log_action_activity(
+                integration_id=str(integration.id),
+                action_id="pull_observations",
+                level="INFO",
+                title=(
+                    f"{len(rate_limited_devices)} device(s) were rate-limited by "
+                    f"ZentraCloud and skipped this cycle; they will be retried on "
+                    f"the next run."
+                ),
+                config_data=pull_config.dict(),
+                data={"rate_limited_devices": rate_limited_devices},
+            )
 
         if readings:
             logger.info(f"Readings pulled with success.")
