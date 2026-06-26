@@ -123,7 +123,9 @@ def _rate_limit_wait_seconds(response, default=DEFAULT_RATE_LIMIT_WAIT_SECONDS):
             detail = response.json().get("detail", "")
         except Exception:
             detail = response.text or ""
-        match = _LOCKOUT_RE.search(detail or "")
+        # detail may not be a string (e.g. a structured error object); coerce
+        # so the regex never raises and we still fall back to the default wait.
+        match = _LOCKOUT_RE.search(str(detail or ""))
         if match:
             raw = int(match.group(1))
     return max(MIN_RATE_LIMIT_WAIT_SECONDS, min(raw, MAX_RATE_LIMIT_WAIT_SECONDS))

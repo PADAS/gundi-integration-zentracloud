@@ -205,6 +205,12 @@ def test_rate_limit_wait_floors_zero_hint():
     ) == MIN_RATE_LIMIT_WAIT_SECONDS
 
 
+def test_rate_limit_wait_handles_non_string_detail():
+    # A structured (non-string) detail must not raise; fall back to default.
+    response = httpx.Response(429, json={"detail": {"code": "throttled"}})
+    assert _rate_limit_wait_seconds(response, default=42) == 42
+
+
 def test_rate_limit_wait_caps_absurd_hint():
     # A bogus/huge hint must not park the action past its execution timeout.
     from app.actions.client import MAX_RATE_LIMIT_WAIT_SECONDS

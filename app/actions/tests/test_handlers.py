@@ -129,9 +129,12 @@ def _patch_pull_deps(mocker, *, devices, returned):
 async def test_pull_logs_one_collapsed_summary_for_rate_limited_devices(mocker):
     # Two of three devices were dropped by the client (persistent 429). We expect
     # exactly ONE summary activity log naming them — not one error per device.
-    summary = _patch_pull_deps(mocker, devices=["z6-1", "z6-2", "z6-3"], returned=["z6-1"])
+    devices = ["z6-1", "z6-2", "z6-3"]
+    summary = _patch_pull_deps(mocker, devices=devices, returned=["z6-1"])
 
-    await handlers.action_pull_observations(integration=FakeIntegration(), action_config=make_config())
+    await handlers.action_pull_observations(
+        integration=FakeIntegration(), action_config=_PullCfg(devices)
+    )
 
     summary.assert_awaited_once()
     kwargs = summary.await_args.kwargs
@@ -142,8 +145,11 @@ async def test_pull_logs_one_collapsed_summary_for_rate_limited_devices(mocker):
 @pytest.mark.asyncio
 async def test_pull_logs_no_summary_when_all_devices_returned(mocker):
     # No device was rate-limited → no summary activity log at all.
-    summary = _patch_pull_deps(mocker, devices=["z6-1", "z6-2"], returned=["z6-1", "z6-2"])
+    devices = ["z6-1", "z6-2"]
+    summary = _patch_pull_deps(mocker, devices=devices, returned=devices)
 
-    await handlers.action_pull_observations(integration=FakeIntegration(), action_config=make_config())
+    await handlers.action_pull_observations(
+        integration=FakeIntegration(), action_config=_PullCfg(devices)
+    )
 
     summary.assert_not_awaited()
