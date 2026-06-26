@@ -10,6 +10,9 @@ from app.actions.client import (
     ZentraCloudUnauthorizedException,
     PullObservationsBadConfigException,
     ZentraCloudResponse,
+    _get_device_readings,
+    _rate_limit_wait_seconds,
+    MAX_RATE_LIMIT_RETRIES,
 )
 from app.actions.configurations import AuthenticateConfig
 
@@ -165,3 +168,148 @@ async def test_verify_credentials_sends_normalized_header_to_chosen_server():
     )
     assert captured["auth"] == "Token abc123"
     assert captured["url"].startswith("https://tahmo.zentracloud.com/api/v4/get_readings/")
+
+
+def _session_from_handler(handler):
+    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def test_rate_limit_wait_prefers_retry_after_header():
+    response = httpx.Response(429, headers={"Retry-After": "12"}, json={"detail": "slow down"})
+    assert _rate_limit_wait_seconds(response) == 12
+
+
+def test_rate_limit_wait_parses_lockout_detail():
+    # TAHMO's body hint when no Retry-After header is present.
+    response = httpx.Response(
+        429,
+        json={"detail": "Exceeded request limit of 1 call per 60 seconds. Lock out expires in 41 seconds."},
+    )
+    assert _rate_limit_wait_seconds(response) == 41
+
+
+def test_rate_limit_wait_falls_back_to_default():
+    response = httpx.Response(429, json={"detail": "throttled"})
+    assert _rate_limit_wait_seconds(response, default=99) == 99
+
+
+def test_rate_limit_wait_floors_zero_hint():
+    # A "0 seconds" / Retry-After: 0 hint must not produce an instant re-request
+    # that wastes a retry; it is floored to MIN_RATE_LIMIT_WAIT_SECONDS.
+    from app.actions.client import MIN_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, headers={"Retry-After": "0"})
+    ) == MIN_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, json={"detail": "Lock out expires in 0 seconds."})
+    ) == MIN_RATE_LIMIT_WAIT_SECONDS
+
+
+def test_rate_limit_wait_handles_non_string_detail():
+    # A structured (non-string) detail must not raise; fall back to default.
+    response = httpx.Response(429, json={"detail": {"code": "throttled"}})
+    assert _rate_limit_wait_seconds(response, default=42) == 42
+
+
+def test_rate_limit_wait_caps_absurd_hint():
+    # A bogus/huge hint must not park the action past its execution timeout.
+    from app.actions.client import MAX_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, json={"detail": "Lock out expires in 99999 seconds."})
+    ) == MAX_RATE_LIMIT_WAIT_SECONDS
+    assert _rate_limit_wait_seconds(
+        httpx.Response(429, headers={"Retry-After": "100000"})
+    ) == MAX_RATE_LIMIT_WAIT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_get_device_readings_waits_then_succeeds_on_429(mocker):
+    # First call is throttled, second succeeds: the device must NOT be lost,
+    # and we must have honored a wait between the two calls.
+    sleep = mocker.patch("app.actions.client.asyncio.sleep", new_callable=mocker.AsyncMock)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, json={"detail": "Lock out expires in 5 seconds."})
+        return httpx.Response(200, json={"pagination": {}, "data": {}})
+
+    result = await _get_device_readings(
+        url="https://tahmo.zentracloud.com/api/v4/get_readings/",
+        params={"device_sn": "z6-27505"},
+        headers={"Authorization": "Token abc"},
+        integration_id="intid",
+        device="z6-27505",
+        session=_session_from_handler(handler),
+    )
+
+    assert result == {"pagination": {}, "data": {}}
+    assert calls["n"] == 2
+    sleep.assert_awaited_once()
+    # Honors the server's lock-out hint (5s) plus the small buffer.
+    assert sleep.await_args.args[0] == 5 + 2
+
+
+@pytest.mark.asyncio
+async def test_get_device_readings_returns_none_when_persistently_429(mocker):
+    # A device that never recovers is skipped (None), not raised — so it can't
+    # abort the rest of the batch.
+    mocker.patch("app.actions.client.asyncio.sleep", new_callable=mocker.AsyncMock)
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        return httpx.Response(429, json={"detail": "Lock out expires in 60 seconds."})
+
+    result = await _get_device_readings(
+        url="https://tahmo.zentracloud.com/api/v4/get_readings/",
+        params={"device_sn": "z6-27505"},
+        headers={"Authorization": "Token abc"},
+        integration_id="intid",
+        device="z6-27505",
+        session=_session_from_handler(handler),
+    )
+
+    assert result is None
+    assert calls["n"] == MAX_RATE_LIMIT_RETRIES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,expected_exc", [
+    (401, ZentraCloudUnauthorizedException),
+    (403, ZentraCloudUnauthorizedException),
+    (400, PullObservationsBadConfigException),
+    (404, PullObservationsBadConfigException),
+])
+async def test_get_device_readings_fails_fast_on_non_retryable_4xx(mocker, status, expected_exc):
+    # Composition with GUNDI-5425: a non-429 4xx is classified by
+    # raise_for_readings_status and fails fast (no wait, single attempt).
+    sleep = mocker.patch("app.actions.client.asyncio.sleep", new_callable=mocker.AsyncMock)
+
+    with pytest.raises(expected_exc):
+        await _get_device_readings(
+            url="https://zentracloud.com/api/v4/get_readings/",
+            params={"device_sn": "z6-27505"},
+            headers={"Authorization": "Token abc"},
+            integration_id="intid",
+            device="z6-27505",
+            session=_session_from_handler(lambda request: httpx.Response(status, json={"detail": "nope"})),
+        )
+    sleep.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_device_readings_raises_retryable_on_5xx(mocker):
+    # 5xx stays an httpx error so the outer stamina loop keeps retrying it.
+    mocker.patch("app.actions.client.asyncio.sleep", new_callable=mocker.AsyncMock)
+
+    with pytest.raises(httpx.HTTPError):
+        await _get_device_readings(
+            url="https://zentracloud.com/api/v4/get_readings/",
+            params={"device_sn": "z6-27505"},
+            headers={"Authorization": "Token abc"},
+            integration_id="intid",
+            device="z6-27505",
+            session=_session_from_handler(lambda request: httpx.Response(503, json={"detail": "boom"})),
+        )
