@@ -3,7 +3,7 @@ import pytest
 
 from app.actions import handlers
 from app.actions.client import ZentraCloudUnauthorizedException, ZentraCloudResponse
-from app.actions.configurations import AuthenticateConfig
+from app.actions.configurations import AuthenticateConfig, DeviceLocation, PullObservationsConfig
 
 
 def make_readings(extra=None):
@@ -110,6 +110,9 @@ class _PullCfg:
     def dict(self):
         return {"devices_serial_number": self.devices_serial_number, "devices_per_page": self.devices_per_page}
 
+    def location_for(self, serial_number):
+        return None
+
 
 def _patch_pull_deps(mocker, *, devices, returned):
     # Silence the activity_logger decorator's pubsub publishes.
@@ -153,3 +156,34 @@ async def test_pull_logs_no_summary_when_all_devices_returned(mocker):
     )
 
     summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_filter_and_transform_uses_configured_device_location(mocker):
+    mocker.patch.object(handlers.state_manager, "get_state", new_callable=mocker.AsyncMock, return_value=None)
+    location = DeviceLocation(serial_number="z6-27505", lat=36.9060639, lon=-121.8430089)
+
+    result = await handlers.filter_and_transform(
+        "z6-27505", make_readings(), "intid", "pull_observations", device_location=location
+    )
+
+    assert result[0]["location"] == {"lat": 36.9060639, "lon": -121.8430089}
+
+
+@pytest.mark.asyncio
+async def test_filter_and_transform_defaults_to_null_island_without_location(mocker):
+    mocker.patch.object(handlers.state_manager, "get_state", new_callable=mocker.AsyncMock, return_value=None)
+
+    result = await handlers.filter_and_transform("z6-27505", make_readings(), "intid", "pull_observations")
+
+    # Backward compatible: devices without a configured location keep 0,0.
+    assert result[0]["location"] == {"lat": 0.0, "lon": 0.0}
+
+
+def test_pull_config_location_for_matches_by_serial():
+    config = PullObservationsConfig.parse_obj({
+        "devices_serial_number": ["z6-1", "z6-2"],
+        "devices_location": [{"serial_number": "z6-1", "lat": 36.9, "lon": -121.8}],
+    })
+    assert config.location_for("z6-1").lat == 36.9
+    assert config.location_for("z6-2") is None

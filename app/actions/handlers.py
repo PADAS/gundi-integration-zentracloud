@@ -25,7 +25,7 @@ def normalize_sensor_name(name):
     return re.sub(r"[^0-9a-z]+", "_", name.strip().lower()).strip("_")
 
 
-async def filter_and_transform(device, readings, integration_id, action_id):
+async def filter_and_transform(device, readings, integration_id, action_id, device_location=None):
     def transform():
         current_log = 0
         total_logs = readings.pagination.page_num_readings
@@ -64,7 +64,12 @@ async def filter_and_transform(device, readings, integration_id, action_id):
                         'type': "stationary-object",
                         "subtype": "weather_station",
                         "recorded_at": reading_datetime,
-                        "location": {"lat": 0.0, "lon": 0.0},  # Just to avoid 400 after posting to ER
+                        "location": (
+                            {"lat": device_location.lat, "lon": device_location.lon}
+                            if device_location
+                            # Legacy placeholder; note ER hides 0,0 observations.
+                            else {"lat": 0.0, "lon": 0.0}
+                        ),
                         "additional": readings_dict
                     }
                 )
@@ -173,7 +178,8 @@ async def action_pull_observations(integration, action_config: PullObservationsC
                     device,
                     device_readings,
                     str(integration.id),
-                    "pull_observations"
+                    "pull_observations",
+                    device_location=pull_config.location_for(device),
                 )
 
                 if transformed_data:
