@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import List
-from pydantic import SecretStr, Field, validator
+from pydantic import BaseModel, SecretStr, Field, validator
 
 from app.services.utils import FieldWithUIOptions, UIOptions, GlobalUISchemaOptions
 from .core import AuthActionConfiguration, PullActionConfiguration, ExecutableActionMixin
@@ -83,6 +83,12 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
         return f"Token {token}"
 
 
+class DeviceLocation(BaseModel):
+    serial_number: str = Field(..., title="Device Serial Number")
+    lat: float = Field(..., ge=-90, le=90, title="Latitude")
+    lon: float = Field(..., ge=-180, le=180, title="Longitude")
+
+
 class PullObservationsConfig(PullActionConfiguration):
     devices_serial_number: List[str] = Field(
         ...,
@@ -90,4 +96,20 @@ class PullObservationsConfig(PullActionConfiguration):
         description="List device serial numbers to fetch data from Zentra Cloud"
     )
 
+    devices_location: List[DeviceLocation] = Field(
+        default_factory=list,
+        title="Device Locations",
+        description=(
+            "Optional fixed location per device (stations are stationary; ZentraCloud's "
+            "get_readings API does not return coordinates). Devices without an entry keep "
+            "the legacy 0,0 placeholder."
+        ),
+    )
+
     devices_per_page: int = 1000
+
+    def location_for(self, serial_number: str):
+        for entry in self.devices_location:
+            if entry.serial_number == serial_number:
+                return entry
+        return None
